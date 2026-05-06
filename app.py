@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 from datetime import datetime
 
 app = Flask(__name__)
@@ -26,18 +26,9 @@ def index():
 
 @app.route("/api/status")
 def api_status():
-    produzindo = sum(1 for m in maquinas.values() if "PRODUZINDO" in m["status"].upper())
-    paradas = sum(1 for m in maquinas.values() if "PARADA" in m["status"].upper())
-    velocidade_total = sum(float(m["velocidade"] or 0) for m in maquinas.values())
-
     return jsonify({
         "maquinas": maquinas,
-        "eventos": eventos[-40:][::-1],
-        "resumo": {
-            "produzindo": produzindo,
-            "paradas": paradas,
-            "velocidade_total": velocidade_total,
-        },
+        "eventos": eventos[-30:][::-1],
         "ultima_atualizacao": datetime.now().strftime("%d/%m/%Y %H:%M:%S")
     })
 
@@ -46,7 +37,8 @@ def api_status():
 def receber():
     dados = request.get_json(force=True)
 
-    if dados.get("api_key") != API_KEY:
+    chave = dados.get("api_key", "")
+    if chave != API_KEY:
         return jsonify({"ok": False, "erro": "API_KEY inválida"}), 403
 
     nome = str(dados.get("maquina", "")).upper().strip()
@@ -59,16 +51,18 @@ def receber():
     m["op"] = str(dados.get("op", m["op"]))
     m["produto"] = str(dados.get("produto", m["produto"]))
     m["equipe"] = str(dados.get("equipe", m["equipe"]))
+
     m["meta"] = int(float(dados.get("meta", m["meta"] or 0)))
     m["total"] = int(float(dados.get("total", m["total"] or 0)))
     m["velocidade"] = float(dados.get("velocidade", m["velocidade"] or 0))
     m["status"] = str(dados.get("status", m["status"]))
+
     m["ultima"] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
 
     eventos.append({
         "data_hora": m["ultima"],
         "maquina": nome,
-        "descricao": f"{nome} | OP {m['op']} | {m['total']} de {m['meta']}"
+        "descricao": f"{nome} atualizada | OP {m['op']} | {m['total']} de {m['meta']}"
     })
 
     return jsonify({"ok": True, "maquina": nome})
@@ -79,305 +73,131 @@ HTML = """
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Dashboard Online PLASTIX</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
 <style>
-:root {
-    --bg: #0f172a;
-    --panel: #111827;
-    --panel2: #1f2937;
-    --text: #e5e7eb;
-    --muted: #9ca3af;
-    --green: #22c55e;
-    --yellow: #eab308;
-    --red: #ef4444;
-    --blue: #38bdf8;
-    --border: rgba(255,255,255,0.10);
-}
-
-* {
-    box-sizing: border-box;
-}
-
 body {
     margin: 0;
-    font-family: Arial, Helvetica, sans-serif;
-    background: radial-gradient(circle at top left, #1e3a8a 0, #0f172a 35%, #020617 100%);
-    color: var(--text);
+    font-family: Arial, sans-serif;
+    background: #0f172a;
+    color: #e5e7eb;
 }
-
 header {
     padding: 18px 24px;
-    border-bottom: 1px solid var(--border);
-    background: rgba(2,6,23,0.78);
-    position: sticky;
-    top: 0;
-    z-index: 10;
-    backdrop-filter: blur(8px);
+    background: #020617;
+    border-bottom: 1px solid rgba(255,255,255,0.12);
 }
-
-header h1 {
+h1 {
     margin: 0;
     font-size: 26px;
 }
-
-header span {
-    display: block;
-    margin-top: 5px;
-    color: var(--muted);
+.sub {
+    color: #94a3b8;
     font-size: 13px;
+    margin-top: 4px;
 }
-
 main {
     padding: 20px;
 }
-
-.summary {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 14px;
-    margin-bottom: 20px;
-}
-
-.metric {
-    background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.03));
-    border: 1px solid var(--border);
-    border-radius: 18px;
-    padding: 16px;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.25);
-}
-
-.metric small {
-    color: var(--muted);
-}
-
-.metric b {
-    display: block;
-    font-size: 30px;
-    margin-top: 8px;
-}
-
 .cards {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     gap: 16px;
 }
-
 .card {
-    background: rgba(17,24,39,0.94);
-    border: 1px solid var(--border);
-    border-radius: 22px;
+    background: #111827;
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 18px;
     padding: 16px;
-    box-shadow: 0 16px 35px rgba(0,0,0,0.30);
-    position: relative;
-    overflow: hidden;
+    box-shadow: 0 12px 28px rgba(0,0,0,0.3);
 }
-
-.card:before {
-    content: "";
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 6px;
-    background: #64748b;
-}
-
-.card.produzindo:before {
-    background: var(--green);
-}
-
-.card.parada:before {
-    background: var(--red);
-}
-
-.card.atencao:before {
-    background: var(--yellow);
-}
-
-.card-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
 .card h2 {
-    margin: 0;
-    font-size: 28px;
+    margin: 0 0 8px;
 }
-
 .badge {
-    padding: 8px 12px;
+    display: inline-block;
+    padding: 6px 10px;
     border-radius: 999px;
     font-size: 12px;
     font-weight: bold;
     background: #334155;
 }
-
-.badge.produzindo {
-    color: #86efac;
-    background: rgba(34,197,94,0.16);
-}
-
-.badge.parada {
-    color: #fca5a5;
-    background: rgba(239,68,68,0.16);
-}
-
-.badge.atencao {
-    color: #fde68a;
-    background: rgba(234,179,8,0.16);
-}
-
-.badge.sem {
-    color: #cbd5e1;
-    background: rgba(148,163,184,0.16);
-}
+.produzindo { color: #86efac; background: rgba(34,197,94,0.15); }
+.parada { color: #fca5a5; background: rgba(239,68,68,0.15); }
+.atencao { color: #fde68a; background: rgba(234,179,8,0.15); }
+.sem { color: #cbd5e1; background: rgba(148,163,184,0.15); }
 
 .info {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 10px;
-    margin-top: 16px;
+    gap: 8px;
+    margin-top: 12px;
 }
-
 .box {
     background: rgba(255,255,255,0.05);
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    padding: 12px;
+    border-radius: 12px;
+    padding: 10px;
 }
-
 .box small {
-    color: var(--muted);
-    display: block;
-    margin-bottom: 5px;
+    color: #94a3b8;
 }
-
 .box b {
-    font-size: 18px;
-    word-break: break-word;
-}
-
-.big {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-    margin-top: 14px;
-}
-
-.big .box {
-    background: linear-gradient(180deg, rgba(56,189,248,0.13), rgba(255,255,255,0.04));
-    border: 1px solid rgba(56,189,248,0.20);
-}
-
-.big b {
     display: block;
-    font-size: 24px;
+    font-size: 16px;
+    margin-top: 4px;
 }
-
 .progress {
-    height: 9px;
+    height: 8px;
     background: rgba(255,255,255,0.12);
     border-radius: 999px;
     overflow: hidden;
-    margin-top: 10px;
+    margin-top: 8px;
 }
-
 .bar {
     height: 100%;
-    background: var(--blue);
+    background: #38bdf8;
 }
-
-.last {
-    color: var(--muted);
-    font-size: 12px;
-    margin-top: 12px;
-}
-
 .charts {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, 1fr);
     gap: 16px;
     margin-top: 22px;
 }
-
 .panel {
-    background: rgba(17,24,39,0.94);
-    border: 1px solid var(--border);
-    border-radius: 22px;
+    background: #111827;
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 18px;
     padding: 16px;
-    box-shadow: 0 16px 35px rgba(0,0,0,0.30);
 }
-
-.panel h3 {
-    margin: 0 0 14px;
-}
-
 table {
     width: 100%;
     border-collapse: collapse;
     margin-top: 22px;
-    background: rgba(17,24,39,0.94);
+    background: #111827;
     border-radius: 18px;
     overflow: hidden;
 }
-
 td, th {
-    padding: 11px;
-    border-bottom: 1px solid var(--border);
+    padding: 10px;
+    border-bottom: 1px solid rgba(255,255,255,0.10);
 }
-
 th {
-    color: var(--muted);
+    color: #94a3b8;
     text-align: left;
 }
-
-@media(max-width: 1200px) {
-    .cards {
-        grid-template-columns: repeat(2, 1fr);
-    }
-    .summary {
-        grid-template-columns: repeat(2, 1fr);
-    }
-}
-
-@media(max-width: 700px) {
-    .cards, .summary, .charts {
-        grid-template-columns: 1fr;
-    }
+@media(max-width: 1100px) {
+    .cards { grid-template-columns: 1fr; }
+    .charts { grid-template-columns: 1fr; }
 }
 </style>
 </head>
-
 <body>
 <header>
-    <h1>Produção Sopradoras - PLASTIX</h1>
-    <span id="ultima">Dashboard online aguardando dados...</span>
+    <h1>Dashboard Online - Produção Sopradoras</h1>
+    <div class="sub" id="ultima">Aguardando dados...</div>
 </header>
 
 <main>
-    <section class="summary">
-        <div class="metric">
-            <small>Velocidade total</small>
-            <b id="velTotal">0 un/h</b>
-        </div>
-        <div class="metric">
-            <small>Produzindo</small>
-            <b id="produzindo">0 máq.</b>
-        </div>
-        <div class="metric">
-            <small>Paradas</small>
-            <b id="paradas">0 máq.</b>
-        </div>
-        <div class="metric">
-            <small>Última atualização</small>
-            <b id="horaAtual" style="font-size:18px;">-</b>
-        </div>
-    </section>
-
     <section class="cards" id="cards"></section>
 
     <section class="charts">
@@ -424,10 +244,6 @@ async function carregar() {
     const data = await r.json();
 
     document.getElementById("ultima").innerText = "Última atualização da página: " + data.ultima_atualizacao;
-    document.getElementById("horaAtual").innerText = data.ultima_atualizacao;
-    document.getElementById("velTotal").innerText = fmt(data.resumo.velocidade_total) + " un/h";
-    document.getElementById("produzindo").innerText = fmt(data.resumo.produzindo) + " máq.";
-    document.getElementById("paradas").innerText = fmt(data.resumo.paradas) + " máq.";
 
     const cards = document.getElementById("cards");
     cards.innerHTML = "";
@@ -445,13 +261,10 @@ async function carregar() {
         const cls = classeStatus(m.status);
 
         const div = document.createElement("div");
-        div.className = "card " + cls;
-
+        div.className = "card";
         div.innerHTML = `
-            <div class="card-head">
-                <h2>${m.nome}</h2>
-                <span class="badge ${cls}">${m.status}</span>
-            </div>
+            <h2>${m.nome}</h2>
+            <span class="badge ${cls}">${m.status}</span>
 
             <div class="info">
                 <div class="box"><small>OP</small><b>${m.op}</b></div>
@@ -460,24 +273,22 @@ async function carregar() {
                 <div class="box"><small>Quantidade OP</small><b>${m.meta > 0 ? fmt(m.meta) : "-"}</b></div>
             </div>
 
-            <div class="big">
-                <div class="box">
-                    <small>Produzidos</small>
-                    <b>${fmt(m.total)} de ${m.meta > 0 ? fmt(m.meta) : "-"}</b>
-                    <div class="progress">
-                        <div class="bar" style="width:${Math.min(perc, 100)}%;"></div>
-                    </div>
-                    <small>${m.meta > 0 ? perc.toFixed(1) + "%" : "Sem quantidade informada"}</small>
+            <div class="box" style="margin-top:10px;">
+                <small>Produzidos</small>
+                <b>${fmt(m.total)} de ${m.meta > 0 ? fmt(m.meta) : "-"}</b>
+                <div class="progress">
+                    <div class="bar" style="width:${Math.min(perc, 100)}%;"></div>
                 </div>
-
-                <div class="box">
-                    <small>Velocidade</small>
-                    <b>${fmt(m.velocidade)} /h</b>
-                </div>
+                <small>${m.meta > 0 ? perc.toFixed(1) + "%" : "Sem quantidade informada"}</small>
             </div>
 
-            <div class="last">
-                Tipo: ${m.tipo} | Última leitura: ${m.ultima}
+            <div class="box" style="margin-top:10px;">
+                <small>Velocidade</small>
+                <b>${fmt(m.velocidade)} un/h</b>
+            </div>
+
+            <div style="color:#94a3b8; font-size:12px; margin-top:10px;">
+                Última leitura: ${m.ultima}
             </div>
         `;
 
@@ -491,22 +302,10 @@ async function carregar() {
 function atualizarGraficos(nomes, totais, percentuais) {
     const opt = {
         responsive: true,
-        plugins: {
-            legend: {
-                labels: {
-                    color: "#e5e7eb"
-                }
-            }
-        },
+        plugins: { legend: { labels: { color: "#e5e7eb" } } },
         scales: {
-            x: {
-                ticks: { color: "#94a3b8" },
-                grid: { color: "rgba(255,255,255,0.08)" }
-            },
-            y: {
-                ticks: { color: "#94a3b8" },
-                grid: { color: "rgba(255,255,255,0.08)" }
-            }
+            x: { ticks: { color: "#94a3b8" }, grid: { color: "rgba(255,255,255,0.08)" } },
+            y: { ticks: { color: "#94a3b8" }, grid: { color: "rgba(255,255,255,0.08)" } }
         }
     };
 
@@ -515,11 +314,7 @@ function atualizarGraficos(nomes, totais, percentuais) {
             type: "bar",
             data: {
                 labels: nomes,
-                datasets: [{
-                    label: "Produzidos",
-                    data: totais,
-                    backgroundColor: "#38bdf8"
-                }]
+                datasets: [{ label: "Produzidos", data: totais }]
             },
             options: opt
         });
@@ -534,11 +329,7 @@ function atualizarGraficos(nomes, totais, percentuais) {
             type: "bar",
             data: {
                 labels: nomes,
-                datasets: [{
-                    label: "Avanço da OP (%)",
-                    data: percentuais,
-                    backgroundColor: "#22c55e"
-                }]
+                datasets: [{ label: "Avanço da OP (%)", data: percentuais }]
             },
             options: opt
         });
